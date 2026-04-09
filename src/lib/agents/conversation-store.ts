@@ -303,17 +303,44 @@ export async function readConversationMeta(
 }
 
 function stripAnsiText(str: string): string {
-  return str
+  let result = str
+    // 7-bit OSC: ESC ] ... BEL/ST
     .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, "")
+    // 8-bit OSC: 0x9D ... ST
+    .replace(/\u009D[\s\S]*?(?:\u009C|\u0007)/g, "")
+    // 7-bit DCS/PM/APC
     .replace(/\u001B[P^_][\s\S]*?\u001B\\/g, "")
-    // Replace cursor-movement CSI sequences with a space to preserve word boundaries
+    // 8-bit DCS/PM/APC
+    .replace(/[\u0090\u009E\u009F][\s\S]*?\u009C/g, "")
+    // Replace cursor-movement CSI (7-bit) with space to preserve word boundaries
     .replace(/\u001B\[\d*[CGHID]/g, " ")
-    // Strip remaining CSI sequences (colors, formatting, erasing)
+    // Replace cursor-movement CSI (8-bit) with space
+    .replace(/\u009B\d*[CGHID]/g, " ")
+    // Strip remaining 7-bit CSI sequences
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
+    // Strip remaining 8-bit CSI sequences
+    .replace(/\u009B[0-?]*[ -/]*[@-~]/g, "")
+    // Strip 7-bit Fe sequences
     .replace(/\u001B[@-_]/g, "")
+    // Strip all remaining C1 control characters (0x80-0x9F)
+    .replace(/[\u0080-\u009F]/g, " ")
+    // Strip C0 control characters (except tab, newline, carriage return)
     .replace(/[\u0000-\u0008\u000B-\u001A\u001C-\u001F\u007F]/g, "")
-    // Collapse runs of spaces produced by cursor replacements
+    // Collapse runs of spaces
     .replace(/ {2,}/g, " ");
+
+  // Heuristic: restore spaces at likely word boundaries lost during stripping
+  result = result
+    // Space before uppercase after lowercase: "factoryVisual" → "factory Visual"
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    // Space after comma/semicolon if followed by letter: "Jetson,FastAPI" → "Jetson, FastAPI"
+    .replace(/([,;])([A-Za-z])/g, "$1 $2")
+    // Space after period if followed by uppercase: "end.Sub" → "end. Sub"
+    .replace(/\.([A-Z])/g, ". $1")
+    // Space around em-dash if touching letters: "SaaS—edge" → "SaaS — edge"
+    .replace(/([A-Za-z])\u2014([A-Za-z])/g, "$1 \u2014 $2");
+
+  return result;
 }
 
 function normalizeDisplayLine(line: string): string {
